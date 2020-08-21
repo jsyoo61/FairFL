@@ -3,22 +3,34 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # %%
+n_E = 10
+n_A = 8
+n_U = 40
+E_batchsize = 1024
+U_batchsize = 128
+I_threshold = 5000
+schedule_f = {
+'random': schedule_random,
+'greedy': schedule_greedy
+}
+schedule = 'random'
+# %%
 def exp(n_E = 10, n_A = 8, n_U = 80, E_batchsize = 1024, U_batchsize = 128, I_threshold = 5000, schedule = 'random'):
     E = np.zeros(n_E)
     U = np.zeros(n_U)
     I = 0
     I_hist = []
     I_sum = 0
-    print(n_A)
+
     while I_sum < I_threshold:
-    # for i in range(200):
+    # for i in range(10):
         # 1]. U receive random amount of data
         U += np.random.randint(U_batchsize, size = n_U)
         np.clip(U, 0, U_batchsize, out = U)
 
         # 2]. Schedule U and E. Distribute data
         # U, E = schedule_random(U, E, n_A)
-        U, E = schedule_f[schedule](U, E, n_A)
+        U, E = schedule_f[schedule](U, E, n_A, E_batchsize)
 
         # 3]. Check if E is full. (I occured)
         I = E >= E_batchsize
@@ -27,18 +39,25 @@ def exp(n_E = 10, n_A = 8, n_U = 80, E_batchsize = 1024, U_batchsize = 128, I_th
 
         # 4]. Flush E
         E[E >= E_batchsize] -= E_batchsize
+        # print(E)
+        # print(4E_batchsize)
         # plt_status(U, E)
+        # plt.show()
 
     I_hist = np.asarray(I_hist)
     return I_hist
 
 # %% PLot Functions
 def results(I_hist):
-    plt_I_hist(I_hist)
-    plt_I_hist_sep(I_hist)
+    # plt_I_hist(I_hist)
+    # plt_I_hist_sep(I_hist)
     I_mean = np.mean(np.sum(I_hist, axis = 1))
-    T = len(I_mean) # I_mean.shape[0]
+    T = len(I_hist) # I_hist.shape[0]
     return I_mean, T
+
+def plt_I_sum(I_hist):
+    plt.figure()
+    plt.bar(range(I_hist.shape[-1]), np.sum(I_hist, axis = 0))
 
 def plt_I_hist(I_hist):
     plt.figure()
@@ -49,7 +68,7 @@ def plt_I_hist_sep(I_hist):
     I_hist = np.cumsum(I_hist, axis = 0)
     plt.figure()
     plt.plot(I_hist)
-    plt.legend(['Edge: {}'.format(i) for i in range(n_E)])
+    plt.legend(['Edge: {}'.format(i) for i in range(I_hist.shape[-1])])
 
 def plt_status(U, E):
     plt.figure()
@@ -58,59 +77,187 @@ def plt_status(U, E):
     plt.bar(range(len(U)), U)
 
 # %% Schedule Functions
-def schedule_random(U, E, n_A):
+def schedule_random(U, E, n_A, E_batchsize):
     n_match = len(E) * n_A
-    assert n_match <= len(U), 'Number of matches({}) exceeds number of devices({})'.format(n_match, len(U))
-    # 1. Random index & random matching
-    random_i = np.arange(len(U))
-    np.random.shuffle(random_i)
-    random_i = random_i[:n_match]
+    # 1] Enough U to match
+    if n_match <= len(U):
+        # 1. Random index & random matching
+        random_i = np.arange(len(U))
+        np.random.shuffle(random_i)
+        random_i = random_i[:n_match]
 
-    # 2. Deliver packet
-    packet = np.sum(U[random_i].reshape(len(E), n_A), axis = 1)
-    E += packet
+        # 2. Deliver packet
+        packet = np.sum(U[random_i].reshape(len(E), n_A), axis = 1)
+        E += packet
 
-    # 3. Flush device U
-    U[random_i] = 0
+        # 3. Flush device U
+        U[random_i] = 0
+
+    # 2] Not enough U to match
+    # assert n_match <= len(U), 'Number of matches({}) exceeds number of devices({})'.format(n_match, len(U))
+    else:
+        n_match = len(U)
+        # 1. Random index & random matching
+        random_i = np.arange(n_match)
+        np.random.shuffle(random_i)
+
+        # 2. Allocate Antennas
+        allocated_A_ = [[] for i in range(len(E))] # Allocation in progress
+        allocated_A = [] # Allocation complete
+        n_left_E = len(allocated_A_)
+        for i in random_i:
+            selected_E_i = np.random.randint(n_left_E)
+            allocated_A_[selected_E_i].append(i)
+            # Maximum number of A full
+            if len(allocated_A_[selected_E_i]) == n_A:
+                assert len(allocated_A_[selected_E_i]) <= n_A
+                allocated_A.append(allocated_A_[selected_E_i])
+                del allocated_A_[selected_E_i]
+                n_left_E = len(allocated_A_)
+
+        allocated_A.extend(allocated_A_)
+        np.random.shuffle(allocated_A)
+
+        # 3. Deliver packet
+        packet = []
+        for i in allocated_A:
+            packet.append(sum(U[i]))
+        packet = np.asarray(packet)
+        E += packet
+
+        # 4. Flush device U
+        U[:] = 0
 
     return U, E
 
-def schedule_greedy(U, E, n_A):
+def schedule_greedy(U, E, n_A, E_batchsize):
     n_match = len(E) * n_A
-    assert n_match <= len(U), 'Number of matches({}) exceeds number of devices({})'.format(n_match, len(U))
-    # 1. Compute vacancies of E
-    E_vacancy = E_batchsize - E
-    E_vacancy[E_vacancy < 0] = 0
-    sorted_E_i = sorted(range(len(E)), key = lambda i: E_vacancy[i])
+    # 1] Enough U to match
+    if n_match <= len(U):
+        # 1. Compute vacancies of E
+        E_vacancy = E_batchsize - E
+        E_vacancy[E_vacancy < 0] = 0
+        sorted_E_i = sorted(range(len(E)), key = lambda i: E_vacancy[i])
 
-    # 2. Index with decreasing U values
-    sorted_U_i = sorted(range(len(U)), key = lambda i: U[i], reverse = True)
-    sorted_U_i = sorted_U_i[:n_match]
+        # 2. Index with decreasing U values
+        sorted_U_i = sorted(range(len(U)), key = lambda i: U[i], reverse = True)
+        sorted_U_i = sorted_U_i[:n_match]
 
-    # 3. Deliver packet
-    packet = np.sum(U[sorted_U_i].reshape(len(E), n_A), axis = 1)
-    E[sorted_E_i] += packet
+        # 3. Deliver packet
+        packet = np.sum(U[sorted_U_i].reshape(len(E), n_A), axis = 1)
+        E[sorted_E_i] += packet
 
-    # 4. Flush device U
-    U[sorted_U_i] = 0
+        # 4. Flush device U
+        U[sorted_U_i] = 0
+
+    # 2] Not enough U to match
+    else:
+        # assert n_match <= len(U), 'Number of matches({}) exceeds number of devices({})'.format(n_match, len(U))
+        n_match = len(U)
+        # 1. Compute vacancies of E
+        E_vacancy = E_batchsize - E
+        E_vacancy[E_vacancy < 0] = 0
+        sorted_E_i = sorted(range(len(E)), key = lambda i: E_vacancy[i])
+
+        # 2. Index with decreasing U values
+        sorted_U = sorted(U, reverse = True)
+
+        # 3. Allocate A
+        # Allocate at least 1 antenna
+        n_allocated_A = np.zeros(len(E), dtype = int)
+        if n_match < len(E):
+            n_allocated_A[:n_match] = 1
+            n_full_A = 0
+        else:
+            n_allocated_A[:] = 1
+            n_full_A = (n_match - len(E)) // (n_A - 1)
+            # Allocate antennas greedily
+            n_allocated_A[:n_full_A] += (n_A - 1)
+            n_allocated_A[n_full_A] += (n_match - len(E)) % (n_A - 1)
+
+        # 4. Deliver packet
+        packet = []
+        start = 0
+        for A in n_allocated_A:
+            if A == 0:
+                packet.append(0)
+            else:
+                end = start + A
+                packet.append(sum(sorted_U[start:end]))
+                start = end
+        packet = np.asarray(packet)
+
+        E[sorted_E_i] += packet
+
+        # 5. Flush device U
+        U[:] = 0
 
     return U, E
 
 # %%
-help(np.random.randint)
-f(U)
-U[40:50] = 0
-U
-x = U[40:50]
+schedule_f = {
+'random': schedule_random,
+'greedy': schedule_greedy
+}
 
-x += 10
-U
+from sklearn.model_selection import ParameterGrid
+static_param = dict(
+E_batchsize = 1024,
+U_batchsize = 128,
+I_threshold = 5000,
+schedule = 'greedy'
+)
+param_grid = dict(
+# E_batchsize = [1024],
+# U_batchsize = [128],
+# I_threshold = [5000],
+n_A = [16],
+n_E = [10],
+n_U = np.arange(80, 85, 2),
+# schedule = ['random', 'greedy']
+)
 
-sorted_E_i
-E_vacancy
-plt.bar(range(10), E)
-plt.bar(range(10), E[sorted_E_i])
-plt.bar(range(10), E_vacancy)
-plt.bar(range(10), E_vacancy[sorted_E_i])
-def f(x):
-    x += 10
+# %%
+I_mean_list = []
+T_list = []
+for grid in ParameterGrid(param_grid):
+    grid.update(static_param)
+    I_hist = exp(**grid)
+    plt_I_hist_sep(I_hist)
+    I_mean, T = results(I_hist)
+
+    I_mean_list.append(I_mean)
+    T_list.append(T)
+
+# %%
+
+shape = tuple([len(param_grid[param]) for param in sorted(param_grid.keys())])
+params = np.array(ParameterGrid(param_grid)).reshape(shape)
+I_mean_list = np.asarray(I_mean_list).reshape(shape)
+T_list = np.asarray(T_list).reshape(shape)
+
+I_mean_list.shape
+I_mean_list[...,0]
+# %%
+np.array(ParameterGrid(param_grid)).reshape(shape)[...,0].reshape(-1, len(param_grid['n_U']))
+I_mean_list[...,0]
+# %%
+I_mean_list[...,0].reshape(-1, len(param_grid['n_U']))
+plt.plot(I_mean_list[...,0].reshape(-1, len(param_grid['n_U'])))
+plt.legend([str(x) for x in np.array(ParameterGrid(param_grid)).reshape(shape)[...,0].reshape(-1, len(param_grid['n_U']))])
+grid
+
+# %%
+param_grid
+grid
+np.array(list(ParameterGrid(param_grid))).reshape(2,1,3,2)[...,1]
+
+grid[0]
+sorted(list(param_grid.keys()))
+
+I_hist = exp(schedule = 'greedy')
+I_mean, T = results(I_hist)
+I_mean
+T
+
+# %%
