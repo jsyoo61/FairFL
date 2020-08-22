@@ -211,9 +211,10 @@ param_grid = dict(
 # E_batchsize = [1024],
 # U_batchsize = [128],
 # I_threshold = [5000],
-n_A = [4, 8,16],
-n_E = [5, 10, 20],
-n_U = [40, 80, 160],
+# n_A = [4, 8,16],
+n_A = np.arange(4, 16),
+n_E = [10],
+n_U = [80, 160],
 # schedule = ['random', 'greedy']
 )
 
@@ -230,81 +231,47 @@ for grid in ParameterGrid(param_grid):
     T_list.append(T)
 
 # %%
-x = 'n_E'
+x = 'n_A'
+plt_factorial_exp(x, param_grid, I_mean_list, T_list)
 param_grid[x]
 
-shape = tuple([len(param_grid[param]) for param in sorted(param_grid.keys())])
-x_axis = sorted(param_grid.keys()).index(x)
-n_x_tick = len(param_grid[x])
-axis_order = list(range(len(param_grid)))
-axis_order.remove(x_axis)
-axis_order.append(x_axis)
-
-params = np.array(ParameterGrid(param_grid)).reshape(shape)
-params = params.transpose(axis_order).reshape(-1, n_x_tick)
-I_mean_list = np.asarray(I_mean_list).reshape(shape)
-I_mean_list = I_mean_list.transpose(axis_order).reshape(-1, n_x_tick)
-T_list = np.asarray(T_list).reshape(shape)
-T_list = T_list.transpose(axis_order).reshape(-1, n_x_tick)
-
 # %%
-legend = params[:,0]
-for param in legend:
-    del param[x]
-legend
+def plt_factorial_exp(x, param_grid, I_mean_list, T_list):
+    # Sort order with respect to axis "x"
+    shape = tuple([len(param_grid[param]) for param in sorted(param_grid.keys())])
+    x_axis = sorted(param_grid.keys()).index(x)
+    n_x_tick = len(param_grid[x])
+    axis_order = list(range(len(param_grid)))
+    axis_order.remove(x_axis)
+    axis_order.append(x_axis)
+    # print(shape, x_axis, n_x_tick, axis_order)
+
+    # Sort results. Resulting shape equals: (-1, n_x_tick)
+    params = np.array(ParameterGrid(param_grid)).reshape(shape)
+    params = params.transpose(axis_order).reshape(-1, n_x_tick)
+    I_mean_list = np.asarray(I_mean_list).reshape(shape)
+    I_mean_list = I_mean_list.transpose(axis_order).reshape(-1, n_x_tick)
+    T_list = np.asarray(T_list).reshape(shape)
+    T_list = T_list.transpose(axis_order).reshape(-1, n_x_tick)
+
+    # %%
+    legend = params[:,0]
+    for param in legend:
+        del param[x]
+    legend
+    # %%
+    plt.figure(figsize = (9,6))
+    # plt.figure()
+    plt.plot(param_grid[x], I_mean_list.T, 'x-')
+    plt.legend(legend)
+    plt.xlabel(x)
+    plt.ylabel('E[I]')
+
+    plt.figure(figsize = (9,6))
+    # plt.figure()
+    plt.plot(param_grid[x], T_list.T, 'x-')
+    plt.legend(legend)
+    plt.xlabel(x)
+    plt.ylabel('T')
 # %%
-plt.figure(figsize = (9,6))
-# plt.figure()
-plt.plot(param_grid[x], I_mean_list.T, 'x-')
-plt.legend(legend)
-plt.xlabel(x)
-plt.ylabel('E[I]')
-
-plt.figure(figsize = (9,6))
-# plt.figure()
-plt.plot(param_grid[x], T_list.T, 'x-')
-plt.legend(legend)
-plt.xlabel(x)
-plt.ylabel('T')
-# %%
-params[0]
-params[1]
-legend = params[:,0]
-for param in legend:
-    del param[x]
-legend
-# %%
-
-
-print(shape, x_axis, n_x_tick, axis_order)
-
-params.shape
-I_mean_list.shape
-params
-I_mean_list
-shape
-I_mean_list.shape
-I_mean_list[...,0]
-# %%
-np.array(ParameterGrid(param_grid)).reshape(shape)[...,0].reshape(-1, len(param_grid['n_U']))
-I_mean_list[...,0]
-# %%
-I_mean_list[...,0].reshape(-1, len(param_grid['n_U']))
-plt.plot(I_mean_list[...,0].reshape(-1, len(param_grid['n_U'])))
-plt.legend([str(x) for x in np.array(ParameterGrid(param_grid)).reshape(shape)[...,0].reshape(-1, len(param_grid['n_U']))])
-grid
-
-# %%
-param_grid
-grid
-np.array(list(ParameterGrid(param_grid))).reshape(2,1,3,2)[...,1]
-
-grid[0]
-sorted(list(param_grid.keys()))
-
-I_hist = exp(schedule = 'greedy')
-I_mean, T = results(I_hist)
-I_mean
-T
-
 # %%
