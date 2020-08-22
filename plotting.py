@@ -205,15 +205,15 @@ static_param = dict(
 E_batchsize = 1024,
 U_batchsize = 128,
 I_threshold = 5000,
-schedule = 'greedy'
+schedule = 'random'
 )
 param_grid = dict(
 # E_batchsize = [1024],
 # U_batchsize = [128],
 # I_threshold = [5000],
-n_A = [16],
-n_E = [10],
-n_U = np.arange(80, 85, 2),
+n_A = [4, 8,16],
+n_E = [5, 10, 20],
+n_U = [40, 80, 160],
 # schedule = ['random', 'greedy']
 )
 
@@ -223,19 +223,66 @@ T_list = []
 for grid in ParameterGrid(param_grid):
     grid.update(static_param)
     I_hist = exp(**grid)
-    plt_I_hist_sep(I_hist)
+    # plt_I_hist_sep(I_hist)
     I_mean, T = results(I_hist)
 
     I_mean_list.append(I_mean)
     T_list.append(T)
 
 # %%
+x = 'n_E'
+param_grid[x]
 
 shape = tuple([len(param_grid[param]) for param in sorted(param_grid.keys())])
-params = np.array(ParameterGrid(param_grid)).reshape(shape)
-I_mean_list = np.asarray(I_mean_list).reshape(shape)
-T_list = np.asarray(T_list).reshape(shape)
+x_axis = sorted(param_grid.keys()).index(x)
+n_x_tick = len(param_grid[x])
+axis_order = list(range(len(param_grid)))
+axis_order.remove(x_axis)
+axis_order.append(x_axis)
 
+params = np.array(ParameterGrid(param_grid)).reshape(shape)
+params = params.transpose(axis_order).reshape(-1, n_x_tick)
+I_mean_list = np.asarray(I_mean_list).reshape(shape)
+I_mean_list = I_mean_list.transpose(axis_order).reshape(-1, n_x_tick)
+T_list = np.asarray(T_list).reshape(shape)
+T_list = T_list.transpose(axis_order).reshape(-1, n_x_tick)
+
+# %%
+legend = params[:,0]
+for param in legend:
+    del param[x]
+legend
+# %%
+plt.figure(figsize = (9,6))
+# plt.figure()
+plt.plot(param_grid[x], I_mean_list.T, 'x-')
+plt.legend(legend)
+plt.xlabel(x)
+plt.ylabel('E[I]')
+
+plt.figure(figsize = (9,6))
+# plt.figure()
+plt.plot(param_grid[x], T_list.T, 'x-')
+plt.legend(legend)
+plt.xlabel(x)
+plt.ylabel('T')
+# %%
+params[0]
+params[1]
+legend = params[:,0]
+for param in legend:
+    del param[x]
+legend
+# %%
+
+
+print(shape, x_axis, n_x_tick, axis_order)
+
+params.shape
+I_mean_list.shape
+params
+I_mean_list
+shape
 I_mean_list.shape
 I_mean_list[...,0]
 # %%
