@@ -3,18 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # %%
-n_E = 10
-n_A = 8
-n_U = 40
-E_batchsize = 1024
-U_batchsize = 128
-I_threshold = 5000
-schedule_f = {
-'random': schedule_random,
-'greedy': schedule_greedy
-}
-schedule = 'random'
-# %%
 def exp(n_E = 10, n_A = 8, n_U = 80, E_batchsize = 1024, U_batchsize = 128, I_threshold = 5000, schedule = 'random'):
     E = np.zeros(n_E)
     U = np.zeros(n_U)
@@ -205,17 +193,18 @@ static_param = dict(
 E_batchsize = 1024,
 U_batchsize = 128,
 I_threshold = 5000,
-schedule = 'random'
+# schedule = 'random'
 )
 param_grid = dict(
 # E_batchsize = [1024],
 # U_batchsize = [128],
 # I_threshold = [5000],
 # n_A = [4, 8,16],
-n_A = np.arange(4, 16),
+n_A = np.arange(4, 17, 4),
 n_E = [10],
-n_U = [80, 160],
-# schedule = ['random', 'greedy']
+# n_U = [40, 80, 120, 160],
+n_U = np.arange(40, 160, 10),
+schedule = ['greedy']
 )
 
 # %%
@@ -231,9 +220,8 @@ for grid in ParameterGrid(param_grid):
     T_list.append(T)
 
 # %%
-x = 'n_A'
+x = 'n_U'
 plt_factorial_exp(x, param_grid, I_mean_list, T_list)
-param_grid[x]
 
 # %%
 def plt_factorial_exp(x, param_grid, I_mean_list, T_list):
@@ -254,24 +242,48 @@ def plt_factorial_exp(x, param_grid, I_mean_list, T_list):
     T_list = np.asarray(T_list).reshape(shape)
     T_list = T_list.transpose(axis_order).reshape(-1, n_x_tick)
 
-    # %%
+
     legend = params[:,0]
     for param in legend:
         del param[x]
     legend
-    # %%
-    plt.figure(figsize = (9,6))
+
+    fig = plt.figure(figsize = (9,6))
     # plt.figure()
     plt.plot(param_grid[x], I_mean_list.T, 'x-')
     plt.legend(legend)
     plt.xlabel(x)
     plt.ylabel('E[I]')
+    savefig(fig)
 
-    plt.figure(figsize = (9,6))
+    fig = plt.figure(figsize = (9,6))
     # plt.figure()
     plt.plot(param_grid[x], T_list.T, 'x-')
     plt.legend(legend)
     plt.xlabel(x)
     plt.ylabel('T')
+    savefig(fig)
+
 # %%
+import os
+FIG_DIR = 'fig/'
+os.makedirs(FIG_DIR, exist_ok=True)
+def savefig(fig):
+    fig_savedir = str(len(os.listdir(FIG_DIR)) + 1) + '.png'
+    fig_savedir = os.path.join(FIG_DIR, fig_savedir)
+    fig.savefig(fig_savedir)
+
+
+
 # %%
+n_E = 10
+n_A = 8
+n_U = 40
+E_batchsize = 1024
+U_batchsize = 128
+I_threshold = 5000
+schedule_f = {
+'random': schedule_random,
+'greedy': schedule_greedy
+}
+schedule = 'random'
