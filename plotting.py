@@ -1,6 +1,7 @@
 # %%
 import numpy as np
 import matplotlib.pyplot as plt
+import cvxpy as cp
 
 # %%
 def exp(n_E = 10, n_A = 8, n_U = 80, E_batchsize = 1024, U_batchsize = 128, I_threshold = 5000, schedule = 'random'):
@@ -11,13 +12,12 @@ def exp(n_E = 10, n_A = 8, n_U = 80, E_batchsize = 1024, U_batchsize = 128, I_th
     I_sum = 0
 
     while I_sum < I_threshold:
-    # for i in range(10):
         # 1]. U receive random amount of data
+        print(I_sum)
         U += np.random.randint(U_batchsize, size = n_U)
         np.clip(U, 0, U_batchsize, out = U)
 
         # 2]. Schedule U and E. Distribute data
-        # U, E = schedule_random(U, E, n_A)
         U, E = schedule_f[schedule](U, E, n_A, E_batchsize)
 
         # 3]. Check if E is full. (I occured)
@@ -27,8 +27,6 @@ def exp(n_E = 10, n_A = 8, n_U = 80, E_batchsize = 1024, U_batchsize = 128, I_th
 
         # 4]. Flush E
         E[E >= E_batchsize] -= E_batchsize
-        # print(E)
-        # print(4E_batchsize)
         # plt_status(U, E)
         # plt.show()
 
@@ -182,10 +180,39 @@ def schedule_greedy(U, E, n_A, E_batchsize):
 
     return U, E
 
+
+def schedule_proposed(U, E, n_A, E_batchsize):
+    I = cp.Variable(len(E), boolean = True)
+    x = cp.Variable((len(U), len(E)), boolean = True)
+    print('variables created, ',end='')
+
+    constraints = [
+    cp.sum(cp.multiply(x, np.broadcast_to(U, (len(E), len(U))).T), axis =  0) >= cp.multiply((E_batchsize - E), I),
+    cp.sum(x, axis = 1) <= 1,
+    cp.sum(x, axis = 0) <= n_A
+    ]
+
+    print('problem ', end='')
+    obj = cp.Maximize(sum(I))
+    prob = cp.Problem(obj, constraints)
+    prob.solve()
+    print('solved')
+
+    # Deliver packet
+    packet = np.sum(x.value * np.broadcast_to(U, (len(E), len(U))).T, axis = 0)
+    E += packet
+    flushed_U_i = x.value.sum(axis = 1).astype(bool)
+    assert np.logical_or(flushed_U_i == 0, flushed_U_i == 1).all(), 'more than one connection from a single device occured,\n%s'%(flushed_U_i)
+
+    # Flush device U
+    U[flushed_U_i] = 0
+
+    return U, E
 # %%
 schedule_f = {
 'random': schedule_random,
-'greedy': schedule_greedy
+'greedy': schedule_greedy,
+'proposed': schedule_proposed,
 }
 
 from sklearn.model_selection import ParameterGrid
@@ -204,13 +231,14 @@ n_A = np.arange(4, 17, 4),
 n_E = [10],
 # n_U = [40, 80, 120, 160],
 n_U = np.arange(40, 160, 10),
-schedule = ['greedy']
+schedule = ['proposed']
 )
 
 # %%
 I_mean_list = []
 T_list = []
 for grid in ParameterGrid(param_grid):
+    print(grid)
     grid.update(static_param)
     I_hist = exp(**grid)
     # plt_I_hist_sep(I_hist)
@@ -284,6 +312,7 @@ U_batchsize = 128
 I_threshold = 5000
 schedule_f = {
 'random': schedule_random,
-'greedy': schedule_greedy
+'greedy': schedule_greedy,
+'proposed': schedule_proposed,
 }
-schedule = 'random'
+schedule = 'proposed'
