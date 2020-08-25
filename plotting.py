@@ -2,6 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import cvxpy as cp
+import os
 
 # %%
 def exp(n_E = 10, n_A = 8, n_U = 80, E_batchsize = 1024, U_batchsize = 128, I_threshold = 5000, schedule = 'random'):
@@ -13,7 +14,7 @@ def exp(n_E = 10, n_A = 8, n_U = 80, E_batchsize = 1024, U_batchsize = 128, I_th
 
     while I_sum < I_threshold:
         # 1]. U receive random amount of data
-        print(I_sum)
+        # print(I_sum, E)
         U += np.random.randint(U_batchsize, size = n_U)
         np.clip(U, 0, U_batchsize, out = U)
 
@@ -49,11 +50,11 @@ def plt_I_hist(I_hist):
     plt.figure()
     plt.plot(np.sum(I_hist, axis = 1))
 
-def plt_I_hist_sep(I_hist):
+def plt_I_hist_sep(I_hist, title = ''):
     plt.figure()
     I_hist = np.cumsum(I_hist, axis = 0)
-    plt.figure()
     plt.plot(I_hist)
+    plt.title(title)
     plt.legend(['Edge: {}'.format(i) for i in range(I_hist.shape[-1])])
 
 def plt_status(U, E):
@@ -61,6 +62,51 @@ def plt_status(U, E):
     plt.bar(range(len(E)), E)
     plt.figure()
     plt.bar(range(len(U)), U)
+
+def plt_factorial_exp(x, param_grid, I_mean_list, T_list):
+    # Sort order with respect to axis "x"
+    shape = tuple([len(param_grid[param]) for param in sorted(param_grid.keys())])
+    x_axis = sorted(param_grid.keys()).index(x)
+    n_x_tick = len(param_grid[x])
+    axis_order = list(range(len(param_grid)))
+    axis_order.remove(x_axis)
+    axis_order.append(x_axis)
+    # print(shape, x_axis, n_x_tick, axis_order)
+
+    # Sort results. Resulting shape equals: (-1, n_x_tick)
+    params = np.array(ParameterGrid(param_grid)).reshape(shape)
+    params = params.transpose(axis_order).reshape(-1, n_x_tick)
+    I_mean_list = np.asarray(I_mean_list).reshape(shape)
+    I_mean_list = I_mean_list.transpose(axis_order).reshape(-1, n_x_tick)
+    T_list = np.asarray(T_list).reshape(shape)
+    T_list = T_list.transpose(axis_order).reshape(-1, n_x_tick)
+
+
+    legend = params[:,0]
+    for param in legend:
+        del param[x]
+    legend
+
+    fig = plt.figure(figsize = (9,6))
+    # plt.figure()
+    plt.plot(param_grid[x], I_mean_list.T, 'x-')
+    plt.legend(legend)
+    plt.xlabel(x)
+    plt.ylabel('E[I]')
+    # savefig(fig)
+
+    fig = plt.figure(figsize = (9,6))
+    # plt.figure()
+    plt.plot(param_grid[x], T_list.T, 'x-')
+    plt.legend(legend)
+    plt.xlabel(x)
+    plt.ylabel('T')
+    # savefig(fig)
+
+def savefig(fig):
+    fig_savedir = str(len(os.listdir(FIG_DIR)) + 1) + '.png'
+    fig_savedir = os.path.join(FIG_DIR, fig_savedir)
+    fig.savefig(fig_savedir)
 
 # %% Schedule Functions
 def schedule_random(U, E, n_A, E_batchsize):
@@ -80,7 +126,6 @@ def schedule_random(U, E, n_A, E_batchsize):
         U[random_i] = 0
 
     # 2] Not enough U to match
-    # assert n_match <= len(U), 'Number of matches({}) exceeds number of devices({})'.format(n_match, len(U))
     else:
         n_match = len(U)
         # 1. Random index & random matching
@@ -116,7 +161,7 @@ def schedule_random(U, E, n_A, E_batchsize):
 
     return U, E
 
-def schedule_greedy(U, E, n_A, E_batchsize):
+def schedule_greedy_p(U, E, n_A, E_batchsize):
     n_match = len(E) * n_A
     # 1] Enough U to match
     if n_match <= len(U):
@@ -138,7 +183,6 @@ def schedule_greedy(U, E, n_A, E_batchsize):
 
     # 2] Not enough U to match
     else:
-        # assert n_match <= len(U), 'Number of matches({}) exceeds number of devices({})'.format(n_match, len(U))
         n_match = len(U)
         # 1. Compute vacancies of E
         E_vacancy = E_batchsize - E
@@ -180,38 +224,123 @@ def schedule_greedy(U, E, n_A, E_batchsize):
 
     return U, E
 
+def schedule_greedy_n(U, E, n_A, E_batchsize):
+    n_match = len(E) * n_A
+    # 1] Enough U to match
+    if n_match <= len(U):
+        # 1. Compute vacancies of E
+        E_vacancy = E_batchsize - E
+        E_vacancy[E_vacancy < 0] = 0
+        sorted_E_i = sorted(range(len(E)), key = lambda i: E_vacancy[i], reverse = True)
+
+        # 2. Index with decreasing U values
+        sorted_U_i = sorted(range(len(U)), key = lambda i: U[i], reverse = True)
+        sorted_U_i = sorted_U_i[:n_match]
+
+        # 3. Deliver packet
+        packet = np.sum(U[sorted_U_i].reshape(len(E), n_A), axis = 1)
+        E[sorted_E_i] += packet
+
+        # 4. Flush device U
+        U[sorted_U_i] = 0
+
+    # 2] Not enough U to match
+    else:
+        n_match = len(U)
+        # 1. Compute vacancies of E
+        E_vacancy = E_batchsize - E
+        E_vacancy[E_vacancy < 0] = 0
+        sorted_E_i = sorted(range(len(E)), key = lambda i: E_vacancy[i], reverse = True)
+
+        # 2. Index with decreasing U values
+        sorted_U = sorted(U, reverse = True)
+
+        # 3. Allocate A
+        # Allocate at least 1 antenna
+        n_allocated_A = np.zeros(len(E), dtype = int)
+        if n_match < len(E):
+            n_allocated_A[:n_match] = 1
+            n_full_A = 0
+        else:
+            n_allocated_A[:] = 1
+            n_full_A = (n_match - len(E)) // (n_A - 1)
+            # Allocate antennas greedily
+            n_allocated_A[:n_full_A] += (n_A - 1)
+            n_allocated_A[n_full_A] += (n_match - len(E)) % (n_A - 1)
+
+        # 4. Deliver packet
+        packet = []
+        start = 0
+        for A in n_allocated_A:
+            if A == 0:
+                packet.append(0)
+            else:
+                end = start + A
+                packet.append(sum(sorted_U[start:end]))
+                start = end
+        packet = np.asarray(packet)
+
+        E[sorted_E_i] += packet
+
+        # 5. Flush device U
+        U[:] = 0
+
+    return U, E
 
 def schedule_proposed(U, E, n_A, E_batchsize):
-    I = cp.Variable(len(E), boolean = True)
-    x = cp.Variable((len(U), len(E)), boolean = True)
-    print('variables created, ',end='')
+    n_match = len(E) * n_A
+    # 1] Enough U to match
+    if n_match <= len(U):
+        best_U_i = sorted(range(len(U)), key = lambda i: U[i], reverse = True)[:n_match]
+        best_U = U[best_U_i]
+    else:
+        n_match = len(U)
+        best_U_i = sorted(range(len(U)), key = lambda i: U[i], reverse = True)
+        best_U = U[best_U_i]
 
+    # 1. Create variables (non static variables)
+    I = cp.Variable(len(E), boolean = True)
+    x = cp.Variable((n_match, len(E)), boolean = True)
+    # print('variables created, ',end='')
+
+    # 2. Define Constraints
     constraints = [
-    cp.sum(cp.multiply(x, np.broadcast_to(U, (len(E), len(U))).T), axis =  0) >= cp.multiply((E_batchsize - E), I),
+    cp.sum(cp.multiply(x, np.broadcast_to(best_U, (len(E), n_match)).T), axis =  0) >= cp.multiply((E_batchsize - E), I),
     cp.sum(x, axis = 1) <= 1,
-    cp.sum(x, axis = 0) <= n_A
+    cp.sum(x, axis = 0) <= n_A,
+    cp.sum(x) == min(len(E) * n_A, n_match)
     ]
 
-    print('problem ', end='')
+    # 3. Create Objective, merge into problem. then solve
+    # print('problem ', end='')
     obj = cp.Maximize(sum(I))
     prob = cp.Problem(obj, constraints)
-    prob.solve()
-    print('solved')
-
-    # Deliver packet
-    packet = np.sum(x.value * np.broadcast_to(U, (len(E), len(U))).T, axis = 0)
+    # prob.solve(solver = cp.CPLEX, verbose=True)
+    prob.solve(solver = cp.CPLEX)
+    # prob.solve(solver = cp.GLPK_MI,verbose=True)
+    # print('solved')
+# x.value.sum(axis=1)
+# x.value.sum(axis=0)
+# x.value
+# I.value
+# E
+# len(U)
+    # 4. Deliver packet using optimized result
+    packet = np.sum(x.value * np.broadcast_to(best_U, (len(E), n_match)).T, axis = 0)
     E += packet
     flushed_U_i = x.value.sum(axis = 1).astype(bool)
     assert np.logical_or(flushed_U_i == 0, flushed_U_i == 1).all(), 'more than one connection from a single device occured,\n%s'%(flushed_U_i)
 
-    # Flush device U
-    U[flushed_U_i] = 0
+    # 5. Flush device U
+    # U[flushed_U_i] = 0
+    U[best_U_i] = 0
 
     return U, E
 # %%
 schedule_f = {
 'random': schedule_random,
-'greedy': schedule_greedy,
+'greedy_p': schedule_greedy_p,
+'greedy_n': schedule_greedy_n,
 'proposed': schedule_proposed,
 }
 
@@ -219,19 +348,21 @@ from sklearn.model_selection import ParameterGrid
 static_param = dict(
 E_batchsize = 1024,
 U_batchsize = 128,
-I_threshold = 5000,
+I_threshold = 100,
 # schedule = 'random'
 )
 param_grid = dict(
 # E_batchsize = [1024],
 # U_batchsize = [128],
 # I_threshold = [5000],
-# n_A = [4, 8,16],
-n_A = np.arange(4, 17, 4),
-n_E = [10],
-# n_U = [40, 80, 120, 160],
-n_U = np.arange(40, 160, 10),
-schedule = ['proposed']
+# n_A = [2,4,8,16],
+n_A = [8],
+# n_A = np.arange(4, 17, 4),
+n_E = [8],
+# n_U = [16,32],
+n_U = np.arange(8, 256, 32),
+# n_U = [20],
+schedule = ['proposed', 'greedy_p', 'greedy_n']
 )
 
 # %%
@@ -241,7 +372,7 @@ for grid in ParameterGrid(param_grid):
     print(grid)
     grid.update(static_param)
     I_hist = exp(**grid)
-    # plt_I_hist_sep(I_hist)
+    plt_I_hist_sep(I_hist, title = grid)
     I_mean, T = results(I_hist)
 
     I_mean_list.append(I_mean)
@@ -251,68 +382,23 @@ for grid in ParameterGrid(param_grid):
 x = 'n_U'
 plt_factorial_exp(x, param_grid, I_mean_list, T_list)
 
-# %%
-def plt_factorial_exp(x, param_grid, I_mean_list, T_list):
-    # Sort order with respect to axis "x"
-    shape = tuple([len(param_grid[param]) for param in sorted(param_grid.keys())])
-    x_axis = sorted(param_grid.keys()).index(x)
-    n_x_tick = len(param_grid[x])
-    axis_order = list(range(len(param_grid)))
-    axis_order.remove(x_axis)
-    axis_order.append(x_axis)
-    # print(shape, x_axis, n_x_tick, axis_order)
+for x, y in zip(ParameterGrid(param_grid), I_mean_list):
+    print(x,y)
 
-    # Sort results. Resulting shape equals: (-1, n_x_tick)
-    params = np.array(ParameterGrid(param_grid)).reshape(shape)
-    params = params.transpose(axis_order).reshape(-1, n_x_tick)
-    I_mean_list = np.asarray(I_mean_list).reshape(shape)
-    I_mean_list = I_mean_list.transpose(axis_order).reshape(-1, n_x_tick)
-    T_list = np.asarray(T_list).reshape(shape)
-    T_list = T_list.transpose(axis_order).reshape(-1, n_x_tick)
-
-
-    legend = params[:,0]
-    for param in legend:
-        del param[x]
-    legend
-
-    fig = plt.figure(figsize = (9,6))
-    # plt.figure()
-    plt.plot(param_grid[x], I_mean_list.T, 'x-')
-    plt.legend(legend)
-    plt.xlabel(x)
-    plt.ylabel('E[I]')
-    savefig(fig)
-
-    fig = plt.figure(figsize = (9,6))
-    # plt.figure()
-    plt.plot(param_grid[x], T_list.T, 'x-')
-    plt.legend(legend)
-    plt.xlabel(x)
-    plt.ylabel('T')
-    savefig(fig)
-
-# %%
-import os
-FIG_DIR = 'fig/'
-os.makedirs(FIG_DIR, exist_ok=True)
-def savefig(fig):
-    fig_savedir = str(len(os.listdir(FIG_DIR)) + 1) + '.png'
-    fig_savedir = os.path.join(FIG_DIR, fig_savedir)
-    fig.savefig(fig_savedir)
-
+I_mean_list
 
 
 # %%
-n_E = 10
-n_A = 8
-n_U = 40
+n_E = 4
+n_A = 4
+n_U = 32
 E_batchsize = 1024
 U_batchsize = 128
 I_threshold = 5000
 schedule_f = {
 'random': schedule_random,
-'greedy': schedule_greedy,
+'greedy_p': schedule_greedy_p,
+'greedy_n': schedule_greedy_n,
 'proposed': schedule_proposed,
 }
 schedule = 'proposed'
